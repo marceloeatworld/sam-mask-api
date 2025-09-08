@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  sam-mask-service:
+    build: .
+    container_name: sam-mask-service
+    ports:
+      - "8739:8739"
+    volumes:
+      # Mount models directory to persist downloaded models
+      - ./models:/app/models
+    env_file:
+      - .env
+    environment:
+      # CPU-only mode (no GPU required)
+      - CUDA_VISIBLE_DEVICES=""
+      # Python optimizations
+      - PYTHONUNBUFFERED=1
+      - OMP_NUM_THREADS=4
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8739/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Resource limits for CPU deployment
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G

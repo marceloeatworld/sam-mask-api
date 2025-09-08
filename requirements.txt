@@ -1,0 +1,25 @@
+# SAM Mask Service Requirements
+
+# Flask Web Framework
+Flask==3.1.2
+flask-cors==6.0.1
+
+# Image Processing
+opencv-python==4.10.0.84
+Pillow==11.3.0
+numpy==1.26.4  # Latest numpy 1.x for mediapipe compatibility
+
+# SAM (Segment Anything Model)
+torch==2.5.1
+torchvision==0.20.1
+segment-anything==1.0
+
+# Face Detection
+mediapipe==0.10.21  # Requires numpy <2.0
+
+# HTTP Requests (for URL support)
+requests==2.32.5
+
+# Production Server
+uvicorn[standard]==0.35.0
+# uvicorn[standard] includes: uvloop, httptools, websockets for better performance
