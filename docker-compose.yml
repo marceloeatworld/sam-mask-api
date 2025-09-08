@@ -8,15 +8,20 @@ services:
       - "8739:8739"
     volumes:
       # Mount models directory to persist downloaded models
-      - ./models:/app/models
-    env_file:
-      - .env
+      - type: bind
+        source: ./models
+        target: /app/models
+        is_directory: true  # Coolify will create this directory
     environment:
+      # API Key (optional - Coolify will show in UI)
+      - SAM_API_KEY=${SAM_API_KEY:-}
       # CPU-only mode (no GPU required)
       - CUDA_VISIBLE_DEVICES=""
       # Python optimizations
       - PYTHONUNBUFFERED=1
       - OMP_NUM_THREADS=4
+      # Coolify magic variables (optional)
+      - SERVICE_FQDN_SAM_8739=/api
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8739/health"]
@@ -33,3 +38,9 @@ services:
         reservations:
           cpus: '1'
           memory: 2G
+    # Coolify labels for proxy (optional - if you want public access)
+    labels:
+      - coolify.managed=true
+      - traefik.enable=true
+      - "traefik.http.routers.sam-mask.rule=Host(`${SERVICE_FQDN_SAM}`) && PathPrefix(`/`)"
+      - traefik.http.routers.sam-mask.entryPoints=http
