@@ -30,6 +30,6 @@ RUN mkdir -p models
 # Expose port
 EXPOSE 8739
 
-# Uvicorn - Best performance for ML services
+# Gunicorn for Flask
 # IMPORTANT: Only 1 worker to keep single model instance in memory
-CMD ["uvicorn", "sam_mask_service:app", "--host", "0.0.0.0", "--port", "8739", "--workers", "1", "--loop", "uvloop"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8739", "--workers", "1", "--timeout", "120", "sam_mask_service:app"]
