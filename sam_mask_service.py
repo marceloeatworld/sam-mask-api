@@ -70,12 +70,8 @@ class SAMMaskService:
     
     def init_sam(self, model_type):
         """Initialize SAM model - loads once and stays in memory"""
-        # Model stored in Laravel storage/models for security
-        # Adjust this path to match your Laravel installation
-        checkpoint_path = f"/path/to/your/laravel/storage/models/sam_{model_type}_01ec64.pth"
-        
-        # For local development (if different):
-        # checkpoint_path = f"models/sam_{model_type}_01ec64.pth"
+        # Use local models directory in Docker container
+        checkpoint_path = f"models/sam_{model_type}_01ec64.pth"
         
         # Download if not exists
         if not os.path.exists(checkpoint_path):
