@@ -21,7 +21,7 @@ models/
 # OS
 .DS_Store
 Thumbs.db
-
+CLAUDE.md
 # Logs
 *.log
 
