@@ -157,14 +157,14 @@ class SAMMaskService:
         except Exception as e:
             raise Exception(f"Failed to download image from URL: {str(e)}")
     
-    def create_mask_from_image(self, image, expand_pixels=5, blur_iterations=10, invert=True, mode='first'):
+    def create_mask_from_image(self, image, expand_pixels=0, blur_iterations=10, invert=True, mode='first'):
         """
         Create face mask from numpy array image
         Extended with optional multi-face support
         
         Args:
             image: numpy array (BGR)
-            expand_pixels: pixels to expand mask (default 5)
+            expand_pixels: pixels to expand mask (default 0)
             blur_iterations: number of blur iterations (default 10)
             invert: if True, face=black/background=white. if False, face=white/background=black (default True)
             mode: 'first' (single face), 'combined' (all faces in one mask), 'crop' (extract each face as separate image)
@@ -398,7 +398,7 @@ def create_mask():
     - image_url: URL to download image from
     - image_path: path to image file
     - image_base64: base64 encoded image
-    - expand_pixels: (optional) default 5
+    - expand_pixels: (optional) default 0
     - blur_iterations: (optional) default 10
     - invert: (optional) default true - if true, face=black/bg=white (Ideogram). if false, face=white/bg=black
     - mode: (optional) default 'first' - 'first' for single face, 'combined' for all faces in one mask
@@ -420,7 +420,7 @@ def create_mask():
         
         logger.info(f"📝 Received data keys: {list(data.keys())}")
         
-        expand_pixels = int(data.get('expand_pixels', 5))
+        expand_pixels = int(data.get('expand_pixels', 0))
         blur_iterations = int(data.get('blur_iterations', 10))
         mode = data.get('mode', 'first')  # New parameter
         
