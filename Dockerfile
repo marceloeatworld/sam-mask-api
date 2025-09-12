@@ -30,6 +30,7 @@ RUN mkdir -p models
 # Expose port
 EXPOSE 8739
 
-# Gunicorn for Flask
+# Gunicorn for Flask with optimized settings
 # IMPORTANT: Only 1 worker to keep single model instance in memory
-CMD ["gunicorn", "--bind", "0.0.0.0:8739", "--workers", "1", "--timeout", "120", "sam_mask_service:app"]
+# Increased threads for better concurrency within single worker
+CMD ["gunicorn", "--bind", "0.0.0.0:8739", "--workers", "1", "--threads", "8", "--timeout", "120", "--worker-class", "gthread", "sam_mask_service:app"]

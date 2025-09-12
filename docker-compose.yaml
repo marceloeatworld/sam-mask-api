@@ -19,7 +19,9 @@ services:
       - CUDA_VISIBLE_DEVICES=""
       # Python optimizations
       - PYTHONUNBUFFERED=1
-      - OMP_NUM_THREADS=4
+      - OMP_NUM_THREADS=8  # 8 threads (optimal pour 3 CPUs)
+      - TORCH_NUM_THREADS=8  # Force PyTorch à utiliser 8 threads
+      - MKL_NUM_THREADS=8  # Intel MKL threads si disponible
       # Coolify magic variables (optional)
       - SERVICE_FQDN_SAM_8739=/api
     restart: unless-stopped
@@ -33,11 +35,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 4G
+          cpus: '3'  # 3 CPUs max (laisse 5 pour autres services)
+          memory: 6G  # 6GB RAM max (laisse 26GB pour autres services)
         reservations:
-          cpus: '1'
-          memory: 2G
+          cpus: '1.5'  # Garantir minimum 1.5 CPUs
+          memory: 3G  # Garantir minimum 3GB RAM
     # Coolify labels for proxy (optional - if you want public access)
     labels:
       - coolify.managed=true

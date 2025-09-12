@@ -17,7 +17,6 @@ import os
 import time
 import logging
 from io import BytesIO
-import tempfile
 import requests
 from PIL import Image
 from functools import wraps
@@ -54,6 +53,12 @@ def require_api_key(f):
 class SAMMaskService:
     def __init__(self):
         """Initialize SAM model and MediaPipe once at startup"""
+        # Optimize PyTorch threads based on environment
+        num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '8')))
+        torch.set_num_threads(num_threads)
+        torch.set_num_interop_threads(2)  # Threads pour la coordination inter-op
+        logger.info(f"🔧 PyTorch using {num_threads} threads")
+        
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.sam_predictor = None
         
@@ -203,7 +208,7 @@ class SAMMaskService:
             input_box = np.array([x, y, x + bbox_w, y + bbox_h])
             
             # Predict the mask
-            masks, scores, logits = self.sam_predictor.predict(
+            masks, scores, _ = self.sam_predictor.predict(
                 point_coords=face_points,
                 point_labels=point_labels,
                 box=input_box,
@@ -492,6 +497,7 @@ def create_mask():
             return jsonify({'error': 'Failed to process image', 'details': stats}), 500
         
         processing_time = time.time() - start_time
+        logger.info(f"⏱️ Processing completed in {processing_time:.2f} seconds")
         
         # Handle different modes
         if mode == 'crop':
