@@ -54,9 +54,15 @@ class SAMMaskService:
     def __init__(self):
         """Initialize SAM model and MediaPipe once at startup"""
         # Optimize PyTorch threads based on environment
-        num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '8')))
+        num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '6')))
         torch.set_num_threads(num_threads)
-        torch.set_num_interop_threads(2)  # Threads pour la coordination inter-op
+        torch.set_num_interop_threads(1)  # Moins de threads inter-op pour éviter la contention
+        
+        # Optimisations CPU supplémentaires
+        if not torch.cuda.is_available():
+            torch.backends.mkl.enabled = True if hasattr(torch.backends, 'mkl') else False
+            torch.backends.openmp.enabled = True if hasattr(torch.backends, 'openmp') else False
+        
         logger.info(f"🔧 PyTorch using {num_threads} threads")
         
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -89,9 +95,21 @@ class SAMMaskService:
         else:
             logger.info(f"✅ SAM model already present: {checkpoint_path}")
         
-        # Load model
+        # Load model with CPU optimizations
         sam = sam_model_registry[model_type](checkpoint=checkpoint_path)
         sam.to(device=self.device)
+        
+        # Enable CPU optimizations
+        if self.device == "cpu":
+            sam.eval()  # Set to evaluation mode
+            # Compile model for faster inference (PyTorch 2.0+)
+            if hasattr(torch, 'compile'):
+                try:
+                    sam = torch.compile(sam, mode="reduce-overhead")
+                    logger.info("✅ Model compiled with torch.compile")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not compile model: {e}")
+        
         self.sam_predictor = SamPredictor(sam)
         logger.info(f"🖥️ Device: {self.device}")
         logger.info(f"✅ SAM model {model_type} initialized")

@@ -19,9 +19,16 @@ services:
       - CUDA_VISIBLE_DEVICES=""
       # Python optimizations
       - PYTHONUNBUFFERED=1
-      - OMP_NUM_THREADS=8  # 8 threads (optimal pour 3 CPUs)
-      - TORCH_NUM_THREADS=8  # Force PyTorch à utiliser 8 threads
-      - MKL_NUM_THREADS=8  # Intel MKL threads si disponible
+      # Optimisations CPU pour PyTorch
+      - OMP_NUM_THREADS=6  # Threads OpenMP
+      - TORCH_NUM_THREADS=6  # Threads PyTorch
+      - MKL_NUM_THREADS=6  # Intel MKL
+      - OPENBLAS_NUM_THREADS=6  # OpenBLAS
+      - VECLIB_MAXIMUM_THREADS=6  # VecLib
+      - NUMEXPR_NUM_THREADS=6  # NumExpr
+      # Désactiver le throttling CPU
+      - KMP_AFFINITY=granularity=fine,compact,1,0
+      - KMP_BLOCKTIME=0
       # Coolify magic variables (optional)
       - SERVICE_FQDN_SAM_8739=/api
     restart: unless-stopped
