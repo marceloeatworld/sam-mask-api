@@ -19,16 +19,17 @@ services:
       - CUDA_VISIBLE_DEVICES=""
       # Python optimizations
       - PYTHONUNBUFFERED=1
-      # Optimisations CPU pour PyTorch
-      - OMP_NUM_THREADS=6  # Threads OpenMP
-      - TORCH_NUM_THREADS=6  # Threads PyTorch
-      - MKL_NUM_THREADS=6  # Intel MKL
-      - OPENBLAS_NUM_THREADS=6  # OpenBLAS
-      - VECLIB_MAXIMUM_THREADS=6  # VecLib
-      - NUMEXPR_NUM_THREADS=6  # NumExpr
-      # Désactiver le throttling CPU
-      - KMP_AFFINITY=granularity=fine,compact,1,0
-      - KMP_BLOCKTIME=0
+      # Optimisations CPU pour PyTorch (match votre PC local)
+      - OMP_NUM_THREADS=12  # Plus de threads pour 6 CPUs
+      - TORCH_NUM_THREADS=12
+      - MKL_NUM_THREADS=12
+      - OPENBLAS_NUM_THREADS=12
+      - VECLIB_MAXIMUM_THREADS=12
+      - NUMEXPR_NUM_THREADS=12
+      # Performance maximale
+      - KMP_AFFINITY=granularity=fine,verbose,compact,1,0
+      - KMP_BLOCKTIME=1
+      - KMP_SETTINGS=1
       # Coolify magic variables (optional)
       - SERVICE_FQDN_SAM_8739=/api
     restart: unless-stopped
@@ -42,11 +43,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '3'  # 3 CPUs max (laisse 5 pour autres services)
-          memory: 6G  # 6GB RAM max (laisse 26GB pour autres services)
+          cpus: '6'  # Utiliser 6 CPUs sur 8
+          memory: 16G  # 16GB RAM pour éviter swapping
         reservations:
-          cpus: '1.5'  # Garantir minimum 1.5 CPUs
-          memory: 3G  # Garantir minimum 3GB RAM
+          cpus: '4'  # Garantir 4 CPUs minimum
+          memory: 8G  # Garantir 8GB RAM minimum
     # Coolify labels for proxy (optional - if you want public access)
     labels:
       - coolify.managed=true

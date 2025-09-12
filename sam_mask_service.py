@@ -54,9 +54,9 @@ class SAMMaskService:
     def __init__(self):
         """Initialize SAM model and MediaPipe once at startup"""
         # Optimize PyTorch threads based on environment
-        num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '6')))
+        num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '12')))
         torch.set_num_threads(num_threads)
-        torch.set_num_interop_threads(1)  # Moins de threads inter-op pour éviter la contention
+        torch.set_num_interop_threads(2)  # Plus de threads inter-op pour 6 CPUs
         
         # Optimisations CPU supplémentaires
         if not torch.cuda.is_available():
@@ -115,12 +115,14 @@ class SAMMaskService:
         logger.info(f"✅ SAM model {model_type} initialized")
     
     def get_face_bbox_mediapipe(self, image):
-        """Detect face using MediaPipe - same as original code"""
+        """Detect face using MediaPipe with fallback for head detection"""
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        h, w = image.shape[:2]
+        
+        # Try with normal confidence first
         results = self.face_detection.process(image_rgb)
         
         if results.detections:
-            h, w = image.shape[:2]
             detection = results.detections[0]
             bbox = detection.location_data.relative_bounding_box
             
@@ -129,24 +131,61 @@ class SAMMaskService:
             box_w = int(bbox.width * w)
             box_h = int(bbox.height * h)
             
-            # Slightly expand the box (same as original)
+            # Expand the box for head
             x = max(0, x - int(box_w * 0.1))
             y = max(0, y - int(box_h * 0.1))
             box_w = min(w - x, int(box_w * 1.2))
             box_h = min(h - y, int(box_h * 1.2))
             
+            logger.info(f"✅ Face detected with confidence")
             return x, y, box_w, box_h
         
-        return None
+        # Fallback: Try with lower confidence
+        self.face_detection_low = self.mp_face_detection.FaceDetection(
+            model_selection=1,
+            min_detection_confidence=0.1  # Very low threshold
+        )
+        results_low = self.face_detection_low.process(image_rgb)
+        
+        if results_low.detections:
+            detection = results_low.detections[0]
+            bbox = detection.location_data.relative_bounding_box
+            
+            x = int(bbox.xmin * w)
+            y = int(bbox.ymin * h)
+            box_w = int(bbox.width * w)
+            box_h = int(bbox.height * h)
+            
+            # Expand more for potential head area
+            x = max(0, x - int(box_w * 0.3))
+            y = max(0, y - int(box_h * 0.5))  # More expansion on top for hair
+            box_w = min(w - x, int(box_w * 1.6))
+            box_h = min(h - y, int(box_h * 1.8))
+            
+            logger.info(f"⚠️ Face/head detected with LOW confidence - expanded area")
+            return x, y, box_w, box_h
+        
+        # Last resort: Use center of image as potential head location
+        logger.warning("⚠️ No face detected - using center region as fallback")
+        center_x = w // 2
+        center_y = h // 2
+        box_size = min(w, h) // 3  # Assume head is about 1/3 of image
+        
+        x = max(0, center_x - box_size // 2)
+        y = max(0, center_y - box_size // 2)
+        box_w = min(w - x, box_size)
+        box_h = min(h - y, box_size)
+        
+        return x, y, box_w, box_h
     
     def get_all_faces_mediapipe(self, image):
-        """Detect ALL faces using MediaPipe - for multi-face mode"""
+        """Detect ALL faces using MediaPipe with fallback"""
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        h, w = image.shape[:2]
         results = self.face_detection.process(image_rgb)
         
         faces = []
         if results.detections:
-            h, w = image.shape[:2]
             for detection in results.detections:
                 bbox = detection.location_data.relative_bounding_box
                 
@@ -161,6 +200,19 @@ class SAMMaskService:
                 box_w = min(w - x, int(box_w * 1.2))
                 box_h = min(h - y, int(box_h * 1.2))
                 
+                faces.append({
+                    'x': x,
+                    'y': y,
+                    'width': box_w,
+                    'height': box_h
+                })
+        
+        # If no faces found, use fallback single detection
+        if not faces:
+            logger.warning("⚠️ No faces detected in multi-face mode - using fallback")
+            face_bbox = self.get_face_bbox_mediapipe(image)
+            if face_bbox:
+                x, y, box_w, box_h = face_bbox
                 faces.append({
                     'x': x,
                     'y': y,
@@ -206,9 +258,10 @@ class SAMMaskService:
             # Original behavior - single face
             face_bbox = self.get_face_bbox_mediapipe(image)
             
+            # Now face_bbox is never None due to fallback
             if face_bbox is None:
-                logger.warning("⚠️ No face detected with MediaPipe")
-                return None, {"error": "No face detected"}
+                logger.warning("⚠️ Critical error in face detection")
+                return None, {"error": "Face detection failed"}
             
             x, y, bbox_w, bbox_h = face_bbox
             logger.info(f"✅ Face detected: x={x}, y={y}, w={bbox_w}, h={bbox_h}")
