@@ -19,17 +19,15 @@ services:
       - CUDA_VISIBLE_DEVICES=""
       # Python optimizations
       - PYTHONUNBUFFERED=1
-      # Optimisations CPU pour PyTorch (match votre PC local)
-      - OMP_NUM_THREADS=12  # Plus de threads pour 6 CPUs
-      - TORCH_NUM_THREADS=12
-      - MKL_NUM_THREADS=12
-      - OPENBLAS_NUM_THREADS=12
-      - VECLIB_MAXIMUM_THREADS=12
-      - NUMEXPR_NUM_THREADS=12
-      # Performance maximale
-      - KMP_AFFINITY=granularity=fine,verbose,compact,1,0
-      - KMP_BLOCKTIME=1
-      - KMP_SETTINGS=1
+      # Optimisations CPU pour PyTorch (optimal pour AMD EPYC)
+      - OMP_NUM_THREADS=8  # 8 threads - sweet spot
+      - TORCH_NUM_THREADS=8
+      - MKL_NUM_THREADS=8
+      - OPENBLAS_NUM_THREADS=8
+      # Performance tuning
+      - KMP_AFFINITY=granularity=fine,compact,1,0
+      - KMP_BLOCKTIME=0  # Pas de spin-wait
+      - OMP_WAIT_POLICY=PASSIVE  # R\u00e9duit la consommation CPU idle
       # Coolify magic variables (optional)
       - SERVICE_FQDN_SAM_8739=/api
     restart: unless-stopped

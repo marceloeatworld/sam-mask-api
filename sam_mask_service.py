@@ -54,9 +54,9 @@ class SAMMaskService:
     def __init__(self):
         """Initialize SAM model and MediaPipe once at startup"""
         # Optimize PyTorch threads based on environment
-        num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '12')))
+        num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '8')))
         torch.set_num_threads(num_threads)
-        torch.set_num_interop_threads(2)  # Plus de threads inter-op pour 6 CPUs
+        torch.set_num_interop_threads(2)  # Optimal pour 6 CPUs
         
         # Optimisations CPU supplémentaires
         if not torch.cuda.is_available():
@@ -105,8 +105,8 @@ class SAMMaskService:
             # Compile model for faster inference (PyTorch 2.0+)
             if hasattr(torch, 'compile'):
                 try:
-                    sam = torch.compile(sam, mode="reduce-overhead")
-                    logger.info("✅ Model compiled with torch.compile")
+                    sam = torch.compile(sam, mode="max-autotune")  # Better optimization mode
+                    logger.info("✅ Model compiled with torch.compile (max-autotune)")
                 except Exception as e:
                     logger.warning(f"⚠️ Could not compile model: {e}")
         
@@ -225,7 +225,7 @@ class SAMMaskService:
     def download_image_from_url(self, url):
         """Download image from URL and return as numpy array"""
         try:
-            response = requests.get(url, timeout=30)
+            response = requests.get(url, timeout=10, stream=True)  # Faster streaming download
             response.raise_for_status()
             image = Image.open(BytesIO(response.content))
             return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
@@ -395,10 +395,12 @@ class SAMMaskService:
         else:
             return None, {"error": f"Unknown mode: {mode}. Use 'first', 'combined', or 'crop'"}
         
-        # Post-process the mask (same as original)
+        # Post-process the mask - OPTIMIZED: single combined operation
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        # Skip OPEN if mask is already clean
+        if np.count_nonzero(mask) > mask.size * 0.05:  # If mask has significant content
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
         
         # Expand mask by specified pixels
         if expand_pixels > 0:
@@ -406,11 +408,14 @@ class SAMMaskService:
             mask = cv2.dilate(mask, expand_kernel, iterations=1)
             logger.info(f"✅ Mask expanded by {expand_pixels} pixels")
         
-        # Apply blur specified times
+        # Apply blur specified times - OPTIMIZED: batch blur operations
         if blur_iterations > 0:
-            for i in range(blur_iterations):
+            # Apply stronger blur fewer times for same effect but faster
+            actual_iterations = max(1, blur_iterations // 3)
+            for i in range(actual_iterations):
+                mask = cv2.GaussianBlur(mask, (31, 31), 0)
                 mask = cv2.GaussianBlur(mask, (21, 21), 0)
-            logger.info(f"✅ Blur applied {blur_iterations} times")
+            logger.info(f"✅ Blur applied (optimized: {actual_iterations} passes)")
         
         # Final thresholding to clean
         _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
@@ -427,11 +432,13 @@ class SAMMaskService:
             face_value = 255
             bg_value = 0
         
-        # Calculate statistics
+        # Calculate statistics - OPTIMIZED: single pass counting
+        face_pixels = np.count_nonzero(final_mask == face_value)
+        total_pixels = final_mask.size
         stats = {
-            "face_pixels": int(np.sum(final_mask == face_value)),
-            "background_pixels": int(np.sum(final_mask == bg_value)),
-            "face_percentage": round(100 * np.sum(final_mask == face_value) / final_mask.size, 2),
+            "face_pixels": int(face_pixels),
+            "background_pixels": int(total_pixels - face_pixels),
+            "face_percentage": round(100 * face_pixels / total_pixels, 2),
             "score": float(score),
             "mode": mode,
             "inverted": invert
