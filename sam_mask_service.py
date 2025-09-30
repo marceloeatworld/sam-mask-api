@@ -61,17 +61,20 @@ def require_api_key(f):
 class SAMMaskService:
     def __init__(self):
         """Initialize SAM model and MediaPipe once at startup"""
-        # Optimize PyTorch threads based on environment
+        # Optimize PyTorch threads based on environment (only if not already set)
         num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '8')))
-        torch.set_num_threads(num_threads)
-        torch.set_num_interop_threads(2)  # Optimal pour 6 CPUs
-        
+        try:
+            torch.set_num_threads(num_threads)
+            torch.set_num_interop_threads(2)  # Optimal pour 6 CPUs
+            logger.info(f"🔧 PyTorch using {num_threads} threads")
+        except RuntimeError as e:
+            # Already configured (can happen in worker context)
+            logger.warning(f"⚠️ PyTorch threads already configured: {e}")
+
         # Optimisations CPU supplémentaires
         if not torch.cuda.is_available():
             torch.backends.mkl.enabled = True if hasattr(torch.backends, 'mkl') else False
             torch.backends.openmp.enabled = True if hasattr(torch.backends, 'openmp') else False
-        
-        logger.info(f"🔧 PyTorch using {num_threads} threads")
         
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.sam_predictor = None

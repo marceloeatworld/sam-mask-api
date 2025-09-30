@@ -14,13 +14,14 @@ logger = logging.getLogger(__name__)
 _sam_service = None
 
 def get_sam_service():
-    """Lazy initialization of SAM service (only once per worker process)"""
+    """Get the pre-loaded SAM service from worker (or lazy load if not available)"""
     global _sam_service
     if _sam_service is None:
-        logger.info("🔧 Initializing SAM service in worker process...")
+        # Fallback: should not happen if worker.py pre-loaded it
+        logger.warning("⚠️ SAM service not pre-loaded! Loading now (this will be slow)...")
         from sam_mask_service import SAMMaskService
         _sam_service = SAMMaskService()
-        logger.info("✅ SAM service initialized and cached in worker")
+        logger.info("✅ SAM service initialized")
     return _sam_service
 
 def process_mask_job(image_data, expand_pixels=0, blur_iterations=10, invert=True, mode='first'):
