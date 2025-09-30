@@ -7,9 +7,21 @@ import logging
 import base64
 import cv2
 import numpy as np
-from sam_mask_service import sam_service
 
 logger = logging.getLogger(__name__)
+
+# Global variable to hold the SAM service (initialized once per worker)
+_sam_service = None
+
+def get_sam_service():
+    """Lazy initialization of SAM service (only once per worker process)"""
+    global _sam_service
+    if _sam_service is None:
+        logger.info("🔧 Initializing SAM service in worker process...")
+        from sam_mask_service import SAMMaskService
+        _sam_service = SAMMaskService()
+        logger.info("✅ SAM service initialized and cached in worker")
+    return _sam_service
 
 def process_mask_job(image_data, expand_pixels=0, blur_iterations=10, invert=True, mode='first'):
     """
@@ -29,6 +41,9 @@ def process_mask_job(image_data, expand_pixels=0, blur_iterations=10, invert=Tru
     """
     try:
         logger.info(f"🔄 Processing job: mode={mode}, type={image_data['type']}")
+
+        # Get SAM service (initialized once per worker)
+        sam_service = get_sam_service()
 
         # Load image based on type
         image = None
