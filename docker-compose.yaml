@@ -11,6 +11,8 @@ services:
     container_name: sam-mask-service
     ports:
       - "8739:8739"
+    extra_hosts:
+      - "redis-host:172.18.0.6"
     volumes:
       # Mount models directory to persist downloaded models
       - type: bind
@@ -58,6 +60,8 @@ services:
   sam-worker:
     build: .
     container_name: sam-worker
+    extra_hosts:
+      - "redis-host:172.18.0.6"
     volumes:
       # Share models directory with API service
       - type: bind
