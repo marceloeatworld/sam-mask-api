@@ -41,6 +41,6 @@ if __name__ == '__main__':
 
     logger.info(f"👷 Starting RQ worker for queue: sam-masks")
 
-    with Connection(redis_conn):
-        worker = SimpleWorker(queues, connection=redis_conn)
-        worker.work()
+    # SimpleWorker doesn't need Connection context manager
+    worker = SimpleWorker(queues, connection=redis_conn)
+    worker.work()
