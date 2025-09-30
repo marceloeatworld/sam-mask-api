@@ -18,10 +18,10 @@ def get_sam_service():
     global _sam_service
     if _sam_service is None:
         # Fallback: should not happen if worker.py pre-loaded it
-        logger.warning("⚠️ SAM service not pre-loaded! Loading now (this will be slow)...")
-        from sam_mask_service import SAMMaskService
-        _sam_service = SAMMaskService()
-        logger.info("✅ SAM service initialized")
+        logger.warning("⚠️ SAM service not pre-loaded! Using module singleton...")
+        import sam_mask_service
+        _sam_service = sam_mask_service.sam_service
+        logger.info("✅ SAM service initialized from singleton")
     return _sam_service
 
 def process_mask_job(image_data, expand_pixels=0, blur_iterations=10, invert=True, mode='first'):

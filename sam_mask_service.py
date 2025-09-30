@@ -469,8 +469,19 @@ class SAMMaskService:
         
         return final_mask, stats
 
-# Initialize service
-sam_service = SAMMaskService()
+# Module-level singleton (lazy-initialized)
+_sam_service_singleton = None
+
+def get_sam_service():
+    """Get or create the singleton SAM service instance"""
+    global _sam_service_singleton
+    if _sam_service_singleton is None:
+        logger.info("🔧 Initializing SAM service singleton...")
+        _sam_service_singleton = SAMMaskService()
+    return _sam_service_singleton
+
+# For backward compatibility - initialize on first access
+sam_service = get_sam_service()
 
 @app.route('/health', methods=['GET'])
 def health():

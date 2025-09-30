@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libgl1 \
     wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -21,9 +21,10 @@ logger.info(f"🔧 PyTorch configured with {num_threads} threads")
 
 # Pre-load SAM model ONCE for the worker process
 logger.info("🔧 Pre-loading SAM model for worker...")
-from sam_mask_service import SAMMaskService
-sam_service_instance = SAMMaskService()
-logger.info("✅ SAM model pre-loaded and ready in worker")
+import sam_mask_service
+# Use the module's singleton instance instead of creating a new one
+sam_service_instance = sam_mask_service.sam_service
+logger.info("✅ SAM model pre-loaded and ready in worker (using module singleton)")
 
 # Make it available globally for tasks
 import tasks
@@ -34,13 +35,22 @@ redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/1')
 redis_conn = Redis.from_url(redis_url)
 
 if __name__ == '__main__':
-    logger.info(f"🔴 Connecting to Redis: {redis_url}")
+    try:
+        logger.info(f"🔴 Connecting to Redis: {redis_url}")
 
-    # Create queues to listen to
-    queues = [Queue('sam-masks', connection=redis_conn)]
+        # Test Redis connection
+        redis_conn.ping()
+        logger.info("✅ Redis connection successful")
 
-    logger.info(f"👷 Starting RQ worker for queue: sam-masks")
+        # Create queues to listen to
+        queues = [Queue('sam-masks', connection=redis_conn)]
 
-    # SimpleWorker doesn't need Connection context manager
-    worker = SimpleWorker(queues, connection=redis_conn)
-    worker.work()
+        logger.info(f"👷 Starting RQ worker for queue: sam-masks")
+
+        # SimpleWorker doesn't need Connection context manager
+        worker = SimpleWorker(queues, connection=redis_conn)
+        worker.work()
+
+    except Exception as e:
+        logger.error(f"❌ Worker failed to start: {str(e)}")
+        raise
