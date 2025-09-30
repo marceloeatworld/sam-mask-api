@@ -60,6 +60,8 @@ services:
   sam-worker:
     build: .
     container_name: sam-worker
+    networks:
+      - default
     extra_hosts:
       - "redis-host:172.18.0.6"
     volumes:
