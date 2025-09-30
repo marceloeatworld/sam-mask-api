@@ -6,7 +6,8 @@ import os
 import logging
 import torch
 from redis import Redis
-from rq import Worker, Queue, Connection
+from rq import Queue, Connection
+from rq.worker import SimpleWorker
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -41,5 +42,5 @@ if __name__ == '__main__':
     logger.info(f"👷 Starting RQ worker for queue: sam-masks")
 
     with Connection(redis_conn):
-        worker = Worker(queues)
+        worker = SimpleWorker(queues, connection=redis_conn)
         worker.work()
