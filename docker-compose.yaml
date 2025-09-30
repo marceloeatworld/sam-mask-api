@@ -1,7 +1,7 @@
 version: '3.8'
 
 networks:
-  default:
+  coolify:
     external: true
     name: coolify
 
@@ -9,6 +9,8 @@ services:
   sam-mask-service:
     build: .
     container_name: sam-mask-service
+    networks:
+      - coolify
     ports:
       - "8739:8739"
     extra_hosts:
@@ -61,7 +63,7 @@ services:
     build: .
     container_name: sam-worker
     networks:
-      - default
+      - coolify
     extra_hosts:
       - "redis-host:172.18.0.6"
     volumes:
