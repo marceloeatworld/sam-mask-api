@@ -28,3 +28,5 @@ CLAUDE.md
 # Environment variables
 .env
 .env.local
+.claude/
+.git/

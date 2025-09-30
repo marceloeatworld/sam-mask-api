@@ -13,8 +13,12 @@ services:
         target: /app/models
         is_directory: true  # Coolify will create this directory
     environment:
-      # API Key (optional - Coolify will show in UI)
+      # API Key (optional - set in Coolify environment variables)
       - SAM_API_KEY=${SAM_API_KEY:-}
+      # Redis connection - REQUIRED: Set in Coolify with your Redis URL
+      # Format: redis://:password@host:6379/1 (use DB 1 to avoid Laravel conflict)
+      # Example: redis://:3U4SY7...@rk0wk0k88oow0gws4kgg44k8:6379/1
+      - REDIS_URL=${REDIS_URL}
       # CPU-only mode (no GPU required)
       - CUDA_VISIBLE_DEVICES=""
       # Python optimizations
@@ -52,3 +56,45 @@ services:
       - traefik.enable=true
       - "traefik.http.routers.sam-mask.rule=Host(`${SERVICE_FQDN_SAM}`) && PathPrefix(`/`)"
       - traefik.http.routers.sam-mask.entryPoints=http
+
+  # RQ Worker - processes mask jobs from queue
+  sam-worker:
+    build: .
+    container_name: sam-worker
+    volumes:
+      # Share models directory with API service
+      - type: bind
+        source: ./models
+        target: /app/models
+        is_directory: true
+    environment:
+      # Redis connection - REQUIRED: Same as API service
+      - REDIS_URL=${REDIS_URL}
+      # CPU-only mode
+      - CUDA_VISIBLE_DEVICES=""
+      # Python optimizations
+      - PYTHONUNBUFFERED=1
+      # CPU threading (same as API)
+      - OMP_NUM_THREADS=8
+      - TORCH_NUM_THREADS=8
+      - MKL_NUM_THREADS=8
+      - OPENBLAS_NUM_THREADS=8
+      # Performance tuning
+      - KMP_AFFINITY=granularity=fine,compact,1,0
+      - KMP_BLOCKTIME=0
+      - OMP_WAIT_POLICY=PASSIVE
+    restart: unless-stopped
+    # Override command to run worker instead of API
+    command: ["python", "worker.py"]
+    # Resource limits (worker processes 1 job at a time)
+    deploy:
+      resources:
+        limits:
+          cpus: '6'  # Same as API for consistent performance
+          memory: 16G
+        reservations:
+          cpus: '4'
+          memory: 8G
+    # Worker depends on models being available
+    depends_on:
+      - sam-mask-service

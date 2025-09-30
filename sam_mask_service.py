@@ -14,18 +14,26 @@ import torch
 from segment_anything import sam_model_registry, SamPredictor
 import mediapipe as mp
 import os
-import time
 import logging
 from io import BytesIO
 import requests
 from PIL import Image
 from functools import wraps
+from redis import Redis
+from rq import Queue
+from rq.job import Job
 
 app = Flask(__name__)
 CORS(app)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Redis connection for job queue
+redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/1')
+redis_conn = Redis.from_url(redis_url)
+job_queue = Queue('sam-masks', connection=redis_conn, default_timeout=600)  # 10 min timeout
+logger.info(f"🔴 Redis connected: {redis_url}")
 
 # API Key authentication
 API_KEY = os.environ.get('SAM_API_KEY', None)
@@ -476,7 +484,7 @@ def health():
 def create_mask():
     """
     Create face mask from image
-    
+
     Accepts:
     - image_url: URL to download image from
     - image_path: path to image file
@@ -485,151 +493,287 @@ def create_mask():
     - blur_iterations: (optional) default 10
     - invert: (optional) default true - if true, face=black/bg=white (Ideogram). if false, face=white/bg=black
     - mode: (optional) default 'first' - 'first' for single face, 'combined' for all faces in one mask
-    
-    Returns:
+    - async: (optional) default false - if true, returns job_id for async processing. if false, processes synchronously (LEGACY)
+
+    Returns (if async=false - LEGACY MODE):
     - mask_base64: base64 encoded mask (PNG)
     - stats: mask statistics (includes mode and inverted status)
+
+    Returns (if async=true - NEW QUEUE MODE):
+    - job_id: ID to check job status with GET /job/<job_id>
+    - status: 'queued'
     """
     try:
-        start_time = time.time()
-        
         # Get parameters
         if request.is_json:
             data = request.get_json()
         elif request.form:
-            data = request.form
+            data = dict(request.form)
         else:
             data = {}
-        
+
         logger.info(f"📝 Received data keys: {list(data.keys())}")
-        
+
         expand_pixels = int(data.get('expand_pixels', 0))
         blur_iterations = int(data.get('blur_iterations', 10))
-        mode = data.get('mode', 'first')  # New parameter
-        
-        # Handle invert parameter (can be string from form or boolean from JSON)
+        mode = data.get('mode', 'first')
+
+        # Handle async parameter (default false for backward compatibility)
+        async_param = data.get('async', 'false')
+        if isinstance(async_param, str):
+            use_async = async_param.lower() in ['true', '1', 'yes']
+        else:
+            use_async = bool(async_param)
+
+        # Handle invert parameter
         invert_param = data.get('invert', 'true')
         if isinstance(invert_param, str):
             invert = invert_param.lower() in ['true', '1', 'yes']
         else:
             invert = bool(invert_param)
-        
-        # Get image
-        image = None
-        
-        # Option 1: Image URL
-        if 'image_url' in data:
-            image_url = data['image_url']
-            logger.info(f"📸 Downloading image from URL: {image_url}")
-            try:
-                image = sam_service.download_image_from_url(image_url)
-                logger.info(f"✅ Image downloaded successfully from URL")
-            except Exception as e:
-                logger.error(f"❌ Failed to download image: {str(e)}")
-                return jsonify({'error': str(e)}), 400
-        
-        # Option 2: Image path
-        elif 'image_path' in data:
-            image_path = data['image_path']
-            if os.path.exists(image_path):
-                image = cv2.imread(image_path)
-                logger.info(f"📸 Processing image from path: {image_path}")
-            else:
-                return jsonify({'error': f'File not found: {image_path}'}), 404
-        
-        # Option 3: Base64 image
-        elif 'image_base64' in data:
-            image_b64 = data['image_base64']
-            # Remove data URL prefix if present
-            if ',' in image_b64:
-                image_b64 = image_b64.split(',')[1]
-            
-            image_data = base64.b64decode(image_b64)
-            image_array = np.frombuffer(image_data, np.uint8)
-            image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-            logger.info("📸 Processing image from base64")
-        
-        # Option 4: File upload (multipart)
-        elif 'image' in request.files:
-            file = request.files['image']
-            image_data = np.frombuffer(file.read(), np.uint8)
-            image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
-            logger.info(f"📸 Processing uploaded file: {file.filename}")
-        
-        else:
-            return jsonify({'error': 'No image provided. Use image_url, image_path, image_base64, or file upload'}), 400
-        
-        if image is None:
-            return jsonify({'error': 'Failed to decode image'}), 400
-        
-        # Create mask or crop faces
-        result, stats = sam_service.create_mask_from_image(
-            image, 
-            expand_pixels=expand_pixels,
-            blur_iterations=blur_iterations,
-            invert=invert,
-            mode=mode
-        )
-        
-        if result is None:
-            return jsonify({'error': 'Failed to process image', 'details': stats}), 500
-        
-        processing_time = time.time() - start_time
-        logger.info(f"⏱️ Processing completed in {processing_time:.2f} seconds")
-        
-        # Handle different modes
-        if mode == 'crop':
-            # Crop mode - return array of cropped face images
-            cropped_faces_b64 = []
-            
-            for face_data in result:
-                # Encode each cropped face as base64 PNG
-                _, buffer = cv2.imencode('.png', face_data['image'])
-                face_b64 = base64.b64encode(buffer).decode('utf-8')
-                
-                cropped_faces_b64.append({
-                    'face_id': face_data['face_id'],
-                    'image_base64': face_b64,
-                    'width': face_data['image'].shape[1],
-                    'height': face_data['image'].shape[0],
-                    'original_bbox': face_data['original_bbox'],
-                    'crop_bbox': face_data['crop_bbox']
-                })
-            
-            return jsonify({
-                'success': True,
-                'mode': 'crop',
-                'cropped_faces': cropped_faces_b64,
-                'stats': stats,
-                'processing_time': round(processing_time, 3),
-                'parameters': {
-                    'mode': mode
+
+        # ASYNC MODE - Queue the job
+        if use_async:
+            # Prepare image data for worker
+            image_data = None
+
+            # Option 1: Image URL
+            if 'image_url' in data:
+                image_data = {
+                    'type': 'url',
+                    'data': data['image_url']
                 }
-            })
-        else:
-            # Mask modes (first, combined) - return mask
-            mask = result
-            
-            # Encode mask as PNG
-            _, buffer = cv2.imencode('.png', mask)
-            mask_b64 = base64.b64encode(buffer).decode('utf-8')
-            
+                logger.info(f"📸 Queuing job for URL: {data['image_url']}")
+
+            # Option 2: Image path
+            elif 'image_path' in data:
+                image_data = {
+                    'type': 'path',
+                    'data': data['image_path']
+                }
+                logger.info(f"📸 Queuing job for path: {data['image_path']}")
+
+            # Option 3: Base64 image
+            elif 'image_base64' in data:
+                image_data = {
+                    'type': 'base64',
+                    'data': data['image_base64']
+                }
+                logger.info("📸 Queuing job for base64 image")
+
+            # Option 4: File upload (convert to base64 for worker)
+            elif 'image' in request.files:
+                file = request.files['image']
+                file_data = file.read()
+                image_b64 = base64.b64encode(file_data).decode('utf-8')
+                image_data = {
+                    'type': 'base64',
+                    'data': image_b64
+                }
+                logger.info(f"📸 Queuing job for uploaded file: {file.filename}")
+
+            else:
+                return jsonify({'error': 'No image provided. Use image_url, image_path, image_base64, or file upload'}), 400
+
+            # Enqueue the job
+            from tasks import process_mask_job
+
+            job = job_queue.enqueue(
+                process_mask_job,
+                image_data,
+                expand_pixels,
+                blur_iterations,
+                invert,
+                mode,
+                job_timeout=600  # 10 minutes max per job
+            )
+
+            logger.info(f"✅ Job queued: {job.id}")
+
             return jsonify({
                 'success': True,
-                'mask_base64': mask_b64,
-                'stats': stats,
-                'processing_time': round(processing_time, 3),
+                'job_id': job.id,
+                'status': 'queued',
+                'check_status_url': f'/job/{job.id}',
                 'parameters': {
                     'expand_pixels': expand_pixels,
                     'blur_iterations': blur_iterations,
                     'invert': invert,
                     'mode': mode
                 }
-            })
-        
+            }), 202  # 202 Accepted
+
+        # SYNCHRONOUS MODE - Process immediately (LEGACY - backward compatible)
+        else:
+            import time
+            start_time = time.time()
+
+            # Get image
+            image = None
+
+            # Option 1: Image URL
+            if 'image_url' in data:
+                image_url = data['image_url']
+                logger.info(f"📸 Downloading image from URL: {image_url}")
+                try:
+                    image = sam_service.download_image_from_url(image_url)
+                    logger.info(f"✅ Image downloaded successfully from URL")
+                except Exception as e:
+                    logger.error(f"❌ Failed to download image: {str(e)}")
+                    return jsonify({'error': str(e)}), 400
+
+            # Option 2: Image path
+            elif 'image_path' in data:
+                image_path = data['image_path']
+                if os.path.exists(image_path):
+                    image = cv2.imread(image_path)
+                    logger.info(f"📸 Processing image from path: {image_path}")
+                else:
+                    return jsonify({'error': f'File not found: {image_path}'}), 404
+
+            # Option 3: Base64 image
+            elif 'image_base64' in data:
+                image_b64 = data['image_base64']
+                # Remove data URL prefix if present
+                if ',' in image_b64:
+                    image_b64 = image_b64.split(',')[1]
+
+                image_data = base64.b64decode(image_b64)
+                image_array = np.frombuffer(image_data, np.uint8)
+                image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+                logger.info("📸 Processing image from base64")
+
+            # Option 4: File upload (multipart)
+            elif 'image' in request.files:
+                file = request.files['image']
+                image_data = np.frombuffer(file.read(), np.uint8)
+                image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+                logger.info(f"📸 Processing uploaded file: {file.filename}")
+
+            else:
+                return jsonify({'error': 'No image provided. Use image_url, image_path, image_base64, or file upload'}), 400
+
+            if image is None:
+                return jsonify({'error': 'Failed to decode image'}), 400
+
+            # Create mask or crop faces
+            result, stats = sam_service.create_mask_from_image(
+                image,
+                expand_pixels=expand_pixels,
+                blur_iterations=blur_iterations,
+                invert=invert,
+                mode=mode
+            )
+
+            if result is None:
+                return jsonify({'error': 'Failed to process image', 'details': stats}), 500
+
+            processing_time = time.time() - start_time
+            logger.info(f"⏱️ Processing completed in {processing_time:.2f} seconds")
+
+            # Handle different modes
+            if mode == 'crop':
+                # Crop mode - return array of cropped face images
+                cropped_faces_b64 = []
+
+                for face_data in result:
+                    # Encode each cropped face as base64 PNG
+                    _, buffer = cv2.imencode('.png', face_data['image'])
+                    face_b64 = base64.b64encode(buffer).decode('utf-8')
+
+                    cropped_faces_b64.append({
+                        'face_id': face_data['face_id'],
+                        'image_base64': face_b64,
+                        'width': face_data['image'].shape[1],
+                        'height': face_data['image'].shape[0],
+                        'original_bbox': face_data['original_bbox'],
+                        'crop_bbox': face_data['crop_bbox']
+                    })
+
+                return jsonify({
+                    'success': True,
+                    'mode': 'crop',
+                    'cropped_faces': cropped_faces_b64,
+                    'stats': stats,
+                    'processing_time': round(processing_time, 3),
+                    'parameters': {
+                        'mode': mode
+                    }
+                })
+            else:
+                # Mask modes (first, combined) - return mask
+                mask = result
+
+                # Encode mask as PNG
+                _, buffer = cv2.imencode('.png', mask)
+                mask_b64 = base64.b64encode(buffer).decode('utf-8')
+
+                return jsonify({
+                    'success': True,
+                    'mask_base64': mask_b64,
+                    'stats': stats,
+                    'processing_time': round(processing_time, 3),
+                    'parameters': {
+                        'expand_pixels': expand_pixels,
+                        'blur_iterations': blur_iterations,
+                        'invert': invert,
+                        'mode': mode
+                    }
+                })
+
     except Exception as e:
-        logger.error(f"Error creating mask: {str(e)}")
+        logger.error(f"Error processing mask: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/job/<job_id>', methods=['GET'])
+@require_api_key
+def get_job_status(job_id):
+    """
+    Check status of a processing job
+
+    Returns:
+    - status: 'queued', 'started', 'finished', 'failed'
+    - result: job result (if finished)
+    - error: error message (if failed)
+    - position: position in queue (if queued)
+    """
+    try:
+        job = Job.fetch(job_id, connection=redis_conn)
+
+        response = {
+            'job_id': job.id,
+            'status': job.get_status(),
+            'created_at': job.created_at.isoformat() if job.created_at else None,
+        }
+
+        # Add status-specific information
+        if job.is_finished:
+            response['result'] = job.result
+            response['finished_at'] = job.ended_at.isoformat() if job.ended_at else None
+
+            # Calculate processing time
+            if job.started_at and job.ended_at:
+                processing_time = (job.ended_at - job.started_at).total_seconds()
+                response['processing_time'] = round(processing_time, 2)
+
+        elif job.is_failed:
+            response['error'] = str(job.exc_info) if job.exc_info else 'Unknown error'
+            response['failed_at'] = job.ended_at.isoformat() if job.ended_at else None
+
+        elif job.is_started:
+            response['started_at'] = job.started_at.isoformat() if job.started_at else None
+
+        elif job.is_queued:
+            # Get position in queue
+            queue_position = job_queue.get_job_position(job_id)
+            if queue_position is not None:
+                response['position'] = queue_position + 1  # 1-indexed for user
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Error fetching job {job_id}: {str(e)}")
+        return jsonify({'error': f'Job not found: {job_id}'}), 404
 
 @app.route('/create_mask_file', methods=['POST'])
 @require_api_key

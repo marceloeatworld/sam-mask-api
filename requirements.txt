@@ -22,3 +22,7 @@ requests==2.32.5
 
 # Production Server
 gunicorn==23.0.0
+
+# Redis Queue for async job processing
+redis==5.0.1
+rq==1.16.2

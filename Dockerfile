@@ -19,6 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY sam_mask_service.py .
+COPY tasks.py .
+COPY worker.py .
 
 # Create models directory
 RUN mkdir -p models
