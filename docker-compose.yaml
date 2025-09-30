@@ -1,5 +1,10 @@
 version: '3.8'
 
+networks:
+  default:
+    external: true
+    name: coolify
+
 services:
   sam-mask-service:
     build: .
@@ -32,8 +37,6 @@ services:
       - KMP_AFFINITY=granularity=fine,compact,1,0
       - KMP_BLOCKTIME=0  # Pas de spin-wait
       - OMP_WAIT_POLICY=PASSIVE  # R\u00e9duit la consommation CPU idle
-      # Coolify magic variables (optional)
-      - SERVICE_FQDN_SAM_8739=/api
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8739/health"]
@@ -50,12 +53,6 @@ services:
         reservations:
           cpus: '4'  # Garantir 4 CPUs minimum
           memory: 8G  # Garantir 8GB RAM minimum
-    # Coolify labels for proxy (optional - if you want public access)
-    labels:
-      - coolify.managed=true
-      - traefik.enable=true
-      - "traefik.http.routers.sam-mask.rule=Host(`${SERVICE_FQDN_SAM}`) && PathPrefix(`/`)"
-      - traefik.http.routers.sam-mask.entryPoints=http
 
   # RQ Worker - processes mask jobs from queue
   sam-worker:
