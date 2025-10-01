@@ -7,6 +7,7 @@ import logging
 import base64
 import cv2
 import numpy as np
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,15 @@ def process_mask_job(image_data, expand_pixels=0, blur_iterations=10, invert=Tru
     Returns:
         dict with 'success', 'mask_base64' or 'cropped_faces', 'stats'
     """
+    start_time = time.time()
     try:
-        logger.info(f"🔄 Processing job: mode={mode}, type={image_data['type']}")
+        # Log image URL/path if available (full URL for verification)
+        image_source = image_data.get('data', 'N/A')
+        if image_data['type'] == 'url':
+            logger.info(f"🔄 Processing job: mode={mode}, type=url")
+            logger.info(f"📥 Image URL: {image_source}")
+        else:
+            logger.info(f"🔄 Processing job: mode={mode}, type={image_data['type']}")
 
         # Get SAM service (initialized once per worker)
         sam_service = get_sam_service()
@@ -105,6 +113,9 @@ def process_mask_job(image_data, expand_pixels=0, blur_iterations=10, invert=Tru
                     'crop_bbox': face_data['crop_bbox']
                 })
 
+            processing_time = time.time() - start_time
+            logger.info(f"✅ Job completed in {processing_time:.2f}s")
+
             return {
                 'success': True,
                 'mode': 'crop',
@@ -117,6 +128,9 @@ def process_mask_job(image_data, expand_pixels=0, blur_iterations=10, invert=Tru
             _, buffer = cv2.imencode('.png', mask)
             mask_b64 = base64.b64encode(buffer).decode('utf-8')
 
+            processing_time = time.time() - start_time
+            logger.info(f"✅ Job completed in {processing_time:.2f}s")
+
             return {
                 'success': True,
                 'mask_base64': mask_b64,
@@ -125,7 +139,8 @@ def process_mask_job(image_data, expand_pixels=0, blur_iterations=10, invert=Tru
             }
 
     except Exception as e:
-        logger.error(f"❌ Job failed: {str(e)}")
+        processing_time = time.time() - start_time
+        logger.error(f"❌ Job failed after {processing_time:.2f}s: {str(e)}")
         return {
             'success': False,
             'error': str(e)
