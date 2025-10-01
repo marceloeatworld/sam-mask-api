@@ -35,7 +35,7 @@ services:
       # Optimisations CPU pour PyTorch (optimal pour AMD EPYC)
       - OMP_NUM_THREADS=8  # 8 threads - sweet spot
       - TORCH_NUM_THREADS=8
-      - MKL_NUM_THREADS=8
+      # MKL_NUM_THREADS removed - Intel MKL slows down AMD CPUs by 2-3x
       - OPENBLAS_NUM_THREADS=8
       # Performance tuning
       - KMP_AFFINITY=granularity=fine,compact,1,0
@@ -82,7 +82,7 @@ services:
       # CPU threading (same as API)
       - OMP_NUM_THREADS=8
       - TORCH_NUM_THREADS=8
-      - MKL_NUM_THREADS=8
+      # MKL_NUM_THREADS removed - Intel MKL slows down AMD CPUs by 2-3x
       - OPENBLAS_NUM_THREADS=8
       # Performance tuning
       - KMP_AFFINITY=granularity=fine,compact,1,0

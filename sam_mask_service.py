@@ -65,8 +65,8 @@ class SAMMaskService:
         num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '8')))
         try:
             torch.set_num_threads(num_threads)
-            torch.set_num_interop_threads(2)  # Optimal pour 6 CPUs
-            logger.info(f"🔧 PyTorch using {num_threads} threads")
+            torch.set_num_interop_threads(4)  # Optimal for AMD EPYC 8 CPUs
+            logger.info(f"🔧 PyTorch using {num_threads} threads, {4} interop threads")
         except RuntimeError as e:
             # Already configured (can happen in worker context)
             logger.warning(f"⚠️ PyTorch threads already configured: {e}")
@@ -125,9 +125,9 @@ class SAMMaskService:
         logger.info(f"🖥️ Device: {self.device}")
         logger.info(f"✅ SAM model {model_type} initialized")
     
-    def get_face_bbox_mediapipe(self, image):
+    def get_face_bbox_mediapipe(self, image, is_rgb=False):
         """Detect face using MediaPipe with fallback for head detection"""
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_rgb = image if is_rgb else cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         h, w = image.shape[:2]
         
         # Try with normal confidence first
@@ -189,9 +189,9 @@ class SAMMaskService:
         
         return x, y, box_w, box_h
     
-    def get_all_faces_mediapipe(self, image):
+    def get_all_faces_mediapipe(self, image, is_rgb=False):
         """Detect ALL faces using MediaPipe with fallback"""
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_rgb = image if is_rgb else cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         h, w = image.shape[:2]
         results = self.face_detection.process(image_rgb)
         
@@ -260,14 +260,18 @@ class SAMMaskService:
             For 'crop': list of cropped face images and stats
         """
         h, w = image.shape[:2]
-        
-        # Configure SAM with the image
-        self.sam_predictor.set_image(image)
-        
+
+        # OPTIMIZATION: Convert BGR to RGB once at the start
+        # SAM and MediaPipe both need RGB, so do it once instead of multiple times
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # Configure SAM with the RGB image
+        self.sam_predictor.set_image(image_rgb)
+
         # Detect faces based on mode
         if mode == 'first':
             # Original behavior - single face
-            face_bbox = self.get_face_bbox_mediapipe(image)
+            face_bbox = self.get_face_bbox_mediapipe(image_rgb, is_rgb=True)
             
             # Now face_bbox is never None due to fallback
             if face_bbox is None:
@@ -308,7 +312,7 @@ class SAMMaskService:
             
         elif mode == 'combined':
             # Multi-face mode - create combined mask
-            faces = self.get_all_faces_mediapipe(image)
+            faces = self.get_all_faces_mediapipe(image_rgb, is_rgb=True)
             
             if not faces:
                 logger.warning("⚠️ No faces detected with MediaPipe")
@@ -354,7 +358,7 @@ class SAMMaskService:
         
         elif mode == 'crop':
             # Crop mode - extract each face as separate image
-            faces = self.get_all_faces_mediapipe(image)
+            faces = self.get_all_faces_mediapipe(image_rgb, is_rgb=True)
             
             if not faces:
                 logger.warning("⚠️ No faces detected with MediaPipe")
@@ -419,14 +423,15 @@ class SAMMaskService:
             mask = cv2.dilate(mask, expand_kernel, iterations=1)
             logger.info(f"✅ Mask expanded by {expand_pixels} pixels")
         
-        # Apply blur specified times - OPTIMIZED: batch blur operations
+        # Apply blur - OPTIMIZED: single pass with scaled kernel for AMD CPU
         if blur_iterations > 0:
-            # Apply stronger blur fewer times for same effect but faster
-            actual_iterations = max(1, blur_iterations // 3)
-            for i in range(actual_iterations):
-                mask = cv2.GaussianBlur(mask, (31, 31), 0)
-                mask = cv2.GaussianBlur(mask, (21, 21), 0)
-            logger.info(f"✅ Blur applied (optimized: {actual_iterations} passes)")
+            # Single blur with scaled kernel (much faster than multiple passes)
+            kernel_size = min(99, 11 + (blur_iterations * 3))
+            # Ensure kernel size is odd
+            if kernel_size % 2 == 0:
+                kernel_size += 1
+            mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
+            logger.info(f"✅ Blur applied (single pass, kernel={kernel_size})")
         
         # Final thresholding to clean
         _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)

@@ -13,11 +13,11 @@ from rq.worker import SimpleWorker
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configure PyTorch BEFORE any other imports
+# Configure PyTorch BEFORE any other imports (optimized for AMD EPYC 8 cores)
 num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '8')))
 torch.set_num_threads(num_threads)
-torch.set_num_interop_threads(2)
-logger.info(f"🔧 PyTorch configured with {num_threads} threads")
+torch.set_num_interop_threads(4)  # Increased from 2 to 4 for better AMD CPU utilization
+logger.info(f"🔧 PyTorch configured with {num_threads} threads, {4} interop threads")
 
 # Pre-load SAM model ONCE for the worker process
 logger.info("🔧 Pre-loading SAM model for worker...")
