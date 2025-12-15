@@ -126,102 +126,130 @@ class SAMMaskService:
         logger.info(f"✅ SAM model {model_type} initialized")
     
     def get_face_bbox_mediapipe(self, image, is_rgb=False):
-        """Detect face using MediaPipe with fallback for head detection"""
+        """Detect face using MediaPipe with fallback for head detection
+
+        Returns expanded bounding box that includes:
+        - Hair (60% expansion on top)
+        - Neck (40% expansion on bottom)
+        - Ears (30% expansion on sides)
+        """
         image_rgb = image if is_rgb else cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         h, w = image.shape[:2]
-        
+
         # Try with normal confidence first
         results = self.face_detection.process(image_rgb)
-        
+
         if results.detections:
             detection = results.detections[0]
             bbox = detection.location_data.relative_bounding_box
-            
-            x = int(bbox.xmin * w)
-            y = int(bbox.ymin * h)
-            box_w = int(bbox.width * w)
-            box_h = int(bbox.height * h)
-            
-            # Expand the box for head
-            x = max(0, x - int(box_w * 0.1))
-            y = max(0, y - int(box_h * 0.1))
-            box_w = min(w - x, int(box_w * 1.2))
-            box_h = min(h - y, int(box_h * 1.2))
-            
-            logger.info(f"✅ Face detected with confidence")
+
+            # Get raw face bbox
+            face_x = int(bbox.xmin * w)
+            face_y = int(bbox.ymin * h)
+            face_w = int(bbox.width * w)
+            face_h = int(bbox.height * h)
+
+            # IMPROVED: Expand box to capture FULL HEAD (hair + face + neck + ears)
+            # Hair: 60% expansion on top
+            # Neck: 40% expansion on bottom
+            # Ears: 30% expansion on sides
+            expand_top = int(face_h * 0.6)
+            expand_bottom = int(face_h * 0.4)
+            expand_sides = int(face_w * 0.3)
+
+            x = max(0, face_x - expand_sides)
+            y = max(0, face_y - expand_top)
+            box_w = min(w - x, face_w + expand_sides * 2)
+            box_h = min(h - y, face_h + expand_top + expand_bottom)
+
+            logger.info(f"✅ Face detected - expanded for full head: x={x}, y={y}, w={box_w}, h={box_h}")
+            logger.info(f"   Original face bbox: x={face_x}, y={face_y}, w={face_w}, h={face_h}")
             return x, y, box_w, box_h
-        
+
         # Fallback: Try with lower confidence
         self.face_detection_low = self.mp_face_detection.FaceDetection(
             model_selection=1,
             min_detection_confidence=0.1  # Very low threshold
         )
         results_low = self.face_detection_low.process(image_rgb)
-        
+
         if results_low.detections:
             detection = results_low.detections[0]
             bbox = detection.location_data.relative_bounding_box
-            
-            x = int(bbox.xmin * w)
-            y = int(bbox.ymin * h)
-            box_w = int(bbox.width * w)
-            box_h = int(bbox.height * h)
-            
-            # Expand more for potential head area
-            x = max(0, x - int(box_w * 0.3))
-            y = max(0, y - int(box_h * 0.5))  # More expansion on top for hair
-            box_w = min(w - x, int(box_w * 1.6))
-            box_h = min(h - y, int(box_h * 1.8))
-            
-            logger.info(f"⚠️ Face/head detected with LOW confidence - expanded area")
+
+            face_x = int(bbox.xmin * w)
+            face_y = int(bbox.ymin * h)
+            face_w = int(bbox.width * w)
+            face_h = int(bbox.height * h)
+
+            # Even more expansion for low confidence (might be partial face)
+            expand_top = int(face_h * 0.8)
+            expand_bottom = int(face_h * 0.5)
+            expand_sides = int(face_w * 0.4)
+
+            x = max(0, face_x - expand_sides)
+            y = max(0, face_y - expand_top)
+            box_w = min(w - x, face_w + expand_sides * 2)
+            box_h = min(h - y, face_h + expand_top + expand_bottom)
+
+            logger.info(f"⚠️ Face/head detected with LOW confidence - extra expanded area")
             return x, y, box_w, box_h
-        
+
         # Last resort: Use center of image as potential head location
         logger.warning("⚠️ No face detected - using center region as fallback")
         center_x = w // 2
-        center_y = h // 2
-        box_size = min(w, h) // 3  # Assume head is about 1/3 of image
-        
+        center_y = h // 3  # Assume head is in upper third
+        box_size = min(w, h) // 2  # Larger area
+
         x = max(0, center_x - box_size // 2)
         y = max(0, center_y - box_size // 2)
         box_w = min(w - x, box_size)
-        box_h = min(h - y, box_size)
-        
+        box_h = min(h - y, int(box_size * 1.3))  # Taller for head
+
         return x, y, box_w, box_h
     
     def get_all_faces_mediapipe(self, image, is_rgb=False):
-        """Detect ALL faces using MediaPipe with fallback"""
+        """Detect ALL faces using MediaPipe with fallback
+
+        Returns expanded bounding boxes that include full head (hair, face, neck, ears)
+        """
         image_rgb = image if is_rgb else cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         h, w = image.shape[:2]
         results = self.face_detection.process(image_rgb)
-        
+
         faces = []
         if results.detections:
             for detection in results.detections:
                 bbox = detection.location_data.relative_bounding_box
-                
-                x = int(bbox.xmin * w)
-                y = int(bbox.ymin * h)
-                box_w = int(bbox.width * w)
-                box_h = int(bbox.height * h)
-                
-                # Slightly expand the box
-                x = max(0, x - int(box_w * 0.1))
-                y = max(0, y - int(box_h * 0.1))
-                box_w = min(w - x, int(box_w * 1.2))
-                box_h = min(h - y, int(box_h * 1.2))
-                
+
+                # Get raw face bbox
+                face_x = int(bbox.xmin * w)
+                face_y = int(bbox.ymin * h)
+                face_w = int(bbox.width * w)
+                face_h = int(bbox.height * h)
+
+                # IMPROVED: Same expansion as single face mode
+                # Hair: 60%, Neck: 40%, Ears: 30%
+                expand_top = int(face_h * 0.6)
+                expand_bottom = int(face_h * 0.4)
+                expand_sides = int(face_w * 0.3)
+
+                x = max(0, face_x - expand_sides)
+                y = max(0, face_y - expand_top)
+                box_w = min(w - x, face_w + expand_sides * 2)
+                box_h = min(h - y, face_h + expand_top + expand_bottom)
+
                 faces.append({
                     'x': x,
                     'y': y,
                     'width': box_w,
                     'height': box_h
                 })
-        
+
         # If no faces found, use fallback single detection
         if not faces:
             logger.warning("⚠️ No faces detected in multi-face mode - using fallback")
-            face_bbox = self.get_face_bbox_mediapipe(image)
+            face_bbox = self.get_face_bbox_mediapipe(image, is_rgb=is_rgb)
             if face_bbox:
                 x, y, box_w, box_h = face_bbox
                 faces.append({
@@ -230,7 +258,7 @@ class SAMMaskService:
                     'width': box_w,
                     'height': box_h
                 })
-        
+
         return faces
     
     def download_image_from_url(self, url):
@@ -279,16 +307,31 @@ class SAMMaskService:
                 return None, {"error": "Face detection failed"}
             
             x, y, bbox_w, bbox_h = face_bbox
-            logger.info(f"✅ Face detected: x={x}, y={y}, w={bbox_w}, h={bbox_h}")
-            
-            # Points at center and around the face (same as original)
+            logger.info(f"✅ Head bbox: x={x}, y={y}, w={bbox_w}, h={bbox_h}")
+
+            # IMPROVED: Strategic points to capture FULL HEAD
+            # - Face center points (for face)
+            # - Top points (for hair/forehead)
+            # - Bottom points (for neck/chin)
+            # - Side points (for ears)
             face_points = np.array([
-                [x + bbox_w//2, y + bbox_h//2],      # Center
-                [x + bbox_w//2, y + bbox_h//3],      # Top
-                [x + bbox_w//3, y + bbox_h//2],      # Left
-                [x + 2*bbox_w//3, y + bbox_h//2],    # Right
+                # Face center area
+                [x + bbox_w//2, y + bbox_h//2],           # Center of head
+                [x + bbox_w//2, y + int(bbox_h * 0.4)],   # Upper face (forehead)
+
+                # Hair area (top)
+                [x + bbox_w//2, y + int(bbox_h * 0.15)],  # Top center (hair)
+                [x + bbox_w//3, y + int(bbox_h * 0.2)],   # Top left (hair)
+                [x + 2*bbox_w//3, y + int(bbox_h * 0.2)], # Top right (hair)
+
+                # Neck area (bottom)
+                [x + bbox_w//2, y + int(bbox_h * 0.85)],  # Neck center
+
+                # Ears area (sides)
+                [x + int(bbox_w * 0.15), y + bbox_h//2],  # Left ear
+                [x + int(bbox_w * 0.85), y + bbox_h//2],  # Right ear
             ])
-            point_labels = np.array([1, 1, 1, 1])  # 1 = foreground
+            point_labels = np.array([1, 1, 1, 1, 1, 1, 1, 1])  # All foreground
             
             # Bounding box as additional prompt
             input_box = np.array([x, y, x + bbox_w, y + bbox_h])
@@ -326,15 +369,23 @@ class SAMMaskService:
             
             for face in faces:
                 x, y, bbox_w, bbox_h = face['x'], face['y'], face['width'], face['height']
-                
-                # Points for this face
+
+                # IMPROVED: Strategic points for full head (same as single face mode)
                 face_points = np.array([
+                    # Face center
                     [x + bbox_w//2, y + bbox_h//2],
-                    [x + bbox_w//2, y + bbox_h//3],
-                    [x + bbox_w//3, y + bbox_h//2],
-                    [x + 2*bbox_w//3, y + bbox_h//2],
+                    [x + bbox_w//2, y + int(bbox_h * 0.4)],
+                    # Hair
+                    [x + bbox_w//2, y + int(bbox_h * 0.15)],
+                    [x + bbox_w//3, y + int(bbox_h * 0.2)],
+                    [x + 2*bbox_w//3, y + int(bbox_h * 0.2)],
+                    # Neck
+                    [x + bbox_w//2, y + int(bbox_h * 0.85)],
+                    # Ears
+                    [x + int(bbox_w * 0.15), y + bbox_h//2],
+                    [x + int(bbox_w * 0.85), y + bbox_h//2],
                 ])
-                point_labels = np.array([1, 1, 1, 1])
+                point_labels = np.array([1, 1, 1, 1, 1, 1, 1, 1])
                 input_box = np.array([x, y, x + bbox_w, y + bbox_h])
                 
                 # Predict mask for this face
