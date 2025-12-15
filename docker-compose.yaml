@@ -17,10 +17,7 @@ services:
       - "redis-host:172.18.0.6"
     volumes:
       # Mount models directory to persist downloaded models
-      - type: bind
-        source: ./models
-        target: /app/models
-        is_directory: true  # Coolify will create this directory
+      - ./models:/app/models
     environment:
       # API Key (optional - set in Coolify environment variables)
       - SAM_API_KEY=${SAM_API_KEY:-}
@@ -68,10 +65,7 @@ services:
       - "redis-host:172.18.0.6"
     volumes:
       # Share models directory with API service
-      - type: bind
-        source: ./models
-        target: /app/models
-        is_directory: true
+      - ./models:/app/models
     environment:
       # Redis connection - REQUIRED: Same as API service
       - REDIS_URL=${REDIS_URL}

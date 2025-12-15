@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  sam-mask-service:
+    build: .
+    container_name: sam-mask-service
+    ports:
+      - "8739:8739"
+    volumes:
+      - ./models:/app/models
+    environment:
+      - CUDA_VISIBLE_DEVICES=""
+      - PYTHONUNBUFFERED=1
+      - OMP_NUM_THREADS=4
+      - TORCH_NUM_THREADS=4
+    restart: unless-stopped
